@@ -1,0 +1,261 @@
+= Задание
+
+1. Тактируемся от _PLL_ на частоте 10 МГц (либо как можно
+ближе к ней).
+2. По нажатию кнопки поменять состояние всех 4 светодиодов на противоположные.
+3. Нажатие кнопки определяется по отпусканию кнопки. Т.е. нужно определить что
+кнопка прижата, и дождаться пока она будет отжата -- это будет будет означать,
+что кнопка нажата.
+
+=== Настройка частоты
+Сначала необходимо настроить заданную частоту (10 МГц).
+
+Для этого включим внешний источник частоты _HSE_ и ждём пока он будет готов,
+далее выбираем _HSE_ как источник тактирования, также необходимо выключить _HSI_,
+в конфигурации _PLL_ ставим _HSE_ как источник и производим вычисления.
+
+Так как на _HSE_ имеем 8 МГц, то для того, чтобы получить на выходе
+значение _10 МГц_, нам нужно произвести следующие действия:
+
+ 8 МГц * 10 МГц / 8 МГц = 10 МГц
+
+
+[source, cpp]
+----
+RCC::CR::HSEON::On::Set(); // включаем внешний источник тактирования
+  while(!RCC::CR::HSERDY::Ready::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Hse::Set();
+  while(!RCC::CFGR::SWS::Hse::IsSet())
+  {
+  }
+  RCC::CR::HSION::Off::Set(); // отключаем ХСИ
+  RCC::PLLCFGR::PLLSRC::HseSource::Set();
+  RCC::PLLCFGR::PLLM0::Set(8U);
+  RCC::PLLCFGR::PLLN0::Set(10U); // 8 MHz * 10/8 MHz = 10 MHz
+  RCC::CR::PLLON::On::Set();
+  while(RCC::CR::PLLRDY::Unlocked::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Pll::Set();
+  while(!RCC::CFGR::SWS::Pll::IsSet())
+  {
+  }
+----
+
+=== Работа с шаблонами
+
+Шаблоны (англ. template) — средство языка C++, предназначенное для кодирования
+обобщённых алгоритмов, без привязки к некоторым параметрам
+(например, типам данных, размерам буферов, значениям по умолчанию).
+
+В C++ возможно создание шаблонов функций и классов.
+
+Шаблоны позволяют создавать параметризованные классы и функции.
+Параметром может быть любой тип или значение одного из допустимых
+типов (целое число, enum, указатель на любой объект с глобально доступным именем,
+ссылка).
+
+Чтобы получить структуру следующего вида нам нужно поработать с классами.
+
+[source, cpp]
+----
+int main()
+{
+    // Здесь надо настроить PLL на 10 Мгц от внешнего источника и переключить его на системную частоту
+
+  for(;;)
+  {
+  if(UserButton::IsPressed())
+  {
+    Leds::Toggle();
+  }
+  }
+  // кнопка находится на порту PORTC.13
+  // светодиоды на порту PC.9, PC.8, PC.5, PA.5
+  // Задание По нажатию кнопки переключать все
+  // 4 светодиода в противоположное состояние
+  return 1 ;
+}
+----
+
+
+
+Создадим 4 класса:
+
+- *_Port_* -- отвечает за работу с портом ( вместо *T* будем передавать значения портов: *GPIOA*, *GPOIC* и т.д.);
+- *_Pin_* -- отвечает за переключение одной ножки;
+- *_Button_* -- отвечает за переключение кнопки;
+- *_Leds_* -- за работу со светодиодами.
+
+
+[source, cpp]
+----
+template<typename T> // Данный класс отвечает за работу с портом ( вместо T будем передавать значения портов: GPIOA, GPOIC и т.д.)
+struct Port
+{
+  static void Set(std::uint32_t value)
+  {
+    T::BSSR::Write(value);
+  }
+
+  static void Reset(std::uint32_t value)
+  {
+    T::BSSR::Write(value << 16U);
+  }
+
+  static void Toggle(std::uint32_t value)
+  {
+    T::ODR::Toggle(value);
+  }
+
+  static auto Get()
+  {
+    return T::IDR::Get();
+  }
+
+};
+
+template<typename Port, uint8_t pinNum>  // Данынй класс отвечает за переключение одной ножки
+struct Pin
+{
+  static void Set()
+  {
+    Port::Set(1U << pinNum);
+  }
+
+  static void Reset()
+  {
+    Port::Reset(1U << pinNum);
+  }
+
+  static void Toggle()
+  {
+    Port::Toggle(1U << pinNum);
+  }
+
+  static auto IsSet()
+  {
+    return ((Port::Get() & (1U << pinNum)) != 0 );
+  }
+
+
+};
+
+template<typename Pin>  // Данынй класс отвечает за переключение кнопки
+struct Button
+{
+   static auto IsPressed()
+  {
+    if(!Pin::IsSet())
+    {
+      while(!Pin::IsSet())
+      {
+
+      }
+      return true;
+    }
+
+    return false;
+
+  }
+};
+
+template<typename ... Tleds> // Данный класс отвечает за работу с индикаторами
+struct Leds
+{
+   static void Toggle()
+  {
+    (Tleds::Toggle(),...);
+  }
+};
+
+----
+
+
+
+В каждом классе описаны определенные функции, которые приведены на рисунках ниже:
+
+
+Также дополнительно была создана функция *Delay*:
+
+[source, cpp]
+----
+void Delay()
+    {
+    for(int i = 0; i < 1000000; i++)
+    {
+    }
+}
+----
+
+Затем, с помощью *using*, введём пользовательские типы:
+
+[source, cpp]
+----
+using ButtonPin = Pin<Port<GPIOC>, 13>; // Вводим польовательский тип, который равен пину (Gpioc, 13)
+using UserButton = Button<ButtonPin>;
+
+using LED1 = Pin<Port<GPIOC>, 5>;
+using LED2 = Pin<Port<GPIOC>, 8>;
+using LED3 = Pin<Port<GPIOC>, 9>;
+using LED4 = Pin<Port<GPIOA>, 5>;
+using MyLeds = Leds<LED1, LED2, LED3, LED4>;
+----
+
+
+Полученный код имеет следующий вид:
+
+
+[source, cpp]
+----
+int main()
+{
+
+  RCC::CR::HSEON::On::Set(); // включаем внешний источник тактирования
+  while(!RCC::CR::HSERDY::Ready::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Hse::Set();
+  while(!RCC::CFGR::SWS::Hse::IsSet())
+  {
+  }
+  RCC::CR::HSION::Off::Set(); // отключаем ХСИ
+  RCC::PLLCFGR::PLLSRC::HseSource::Set();
+  RCC::PLLCFGR::PLLM0::Set(8U);
+  RCC::PLLCFGR::PLLN0::Set(10U); // 8 MHz * 10/8 MHz = 10 MHz
+  RCC::CR::PLLON::On::Set();
+  while(RCC::CR::PLLRDY::Unlocked::IsSet())
+  {
+  }
+  RCC::CFGR::SW::Pll::Set();
+  while(!RCC::CFGR::SWS::Pll::IsSet())
+  {
+  }
+
+    RCC::AHB1ENR::GPIOCEN::Enable::Set(); // подключение портов
+    RCC::AHB1ENR::GPIOAEN::Enable::Set();
+    GPIOC::MODER::MODER13::Input::Set(); // настройка на выход
+    GPIOC::MODER::MODER5::Output::Set();
+    GPIOC::MODER::MODER8::Output::Set();
+    GPIOC::MODER::MODER9::Output::Set();
+    GPIOA::MODER::MODER5::Output::Set();
+
+  for(;;) // вечный цикл
+    {
+    if(UserButton::IsPressed()) // кнопка
+    {
+//      LED1::Toggle();
+//      LED2::Toggle();
+//      LED3::Toggle();
+//      LED4::Toggle();
+      MyLeds::Toggle();
+    }
+    Delay();
+  }
+}
+----
+
+
+
